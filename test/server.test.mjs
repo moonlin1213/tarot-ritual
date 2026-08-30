@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -136,13 +136,17 @@ test('DSH opt-in imports metadata and uses keys without exposing or refreshing c
       return original(input, init);
     };
   `);
-  const enabled = spawn(process.execPath, ['--import', path.join(dir, 'guard.mjs'), path.join(dir, 'server.mjs')], {
+  // ESM interprets a Windows drive letter as a URL scheme; use a file URL.
+  const enabled = spawn(process.execPath, ['--import', pathToFileURL(path.join(dir, 'guard.mjs')).href, path.join(dir, 'server.mjs')], {
     env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: dir, USERPROFILE: dir, PORT: '0', TAROT_DSH_DIR: path.join(dir, '.dsh'), TAROT_DSH_IMPORT: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
+  let startupError = '';
+  enabled.stderr.on('data', c => { startupError += c; });
   try {
     const address = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('opt-in startup timeout')), 5000);
       enabled.on('error', e => { clearTimeout(timer); reject(e); });
+      enabled.once('exit', () => { clearTimeout(timer); reject(new Error('opt-in server exited: ' + startupError)); });
       enabled.stdout.on('data', c => { const m = String(c).match(/http:\/\/127\.0\.0\.1:\d+/); if (m) { clearTimeout(timer); resolve(m[0]); } });
     });
     const metadata = await (await fetch(address + '/api/dsh', { headers })).text();
@@ -155,5 +159,7 @@ test('DSH opt-in imports metadata and uses keys without exposing or refreshing c
     assert.equal(expired.status, 401);
     assert.equal(await fs.readFile(oauthPath, 'utf8'), fixture);
     assert.equal(await fs.stat(path.join(dir, 'unexpected-network.txt')).then(() => true, () => false), false);
-  } finally { const done = once(enabled, 'exit'); enabled.kill(); await done; }
+  } finally {
+    if (enabled.pid && enabled.exitCode === null) { const done = once(enabled, 'exit'); enabled.kill(); await done; }
+  }
 });
