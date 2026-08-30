@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARCANUM · 星轨塔罗圣仪</title>
+<link rel="stylesheet" href="./fonts/fonts.css">
+<link rel="stylesheet" href="./css/style.css">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+<script>
+  window.__errors = [];
+  window.addEventListener('error', e => { window.__errors.push((e.message || e.target?.src || e.target?.href || 'resource') + ' @ ' + (e.filename || '') + ':' + e.lineno); }, true);
+  window.addEventListener('unhandledrejection', e => { window.__errors.push('REJ: ' + String((e.reason && e.reason.stack) || e.reason)); });
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="veil"></div>
+
+<header id="topbar">
+  <div class="brand">
+    <div class="monogram"><i></i></div>
+    <div class="brand-text">
+      <span class="brand-en">ARCANUM</span>
+      <span class="brand-zh">星轨塔罗圣仪</span>
+    </div>
+  </div>
+  <div class="top-right">
+    <button id="providerOrb" class="orb-btn" title="神谕来源设置">
+      <span class="orb-dot" id="orbDot"></span>
+      <span class="orb-label" id="providerLabel">神谕未连</span>
+    </button>
+  </div>
+</header>
+
+<main id="ui">
+
+  <!-- 一 · 问询 -->
+  <section id="phase-question" class="phase">
+    <div class="panel question-panel">
+      <div class="eyebrow">CONSULT THE ORACLE</div>
+      <h1 class="title-zh">以心问卜</h1>
+      <div class="ornament"><i></i><b></b><i></i></div>
+      <textarea id="questionInput" rows="3" spellcheck="false"
+        placeholder="将所问之事写于此处。问题越恳切，牌语越清澈。"></textarea>
+      <div class="mode-row">
+        <label class="mode-opt"><input type="radio" name="spreadMode" value="auto" checked><span>依问择阵</span></label>
+        <label class="mode-opt"><input type="radio" name="spreadMode" value="manual"><span>自行选阵</span></label>
+        <label class="mode-opt photo-opt"><input type="checkbox" id="photoMode"><span>实景占卜</span></label>
+      </div>
+      <div class="btn-row">
+        <button id="beginBtn" class="btn primary">启 示</button>
+      </div>
+      <p class="whisper">静心，屏息，诚而问之。</p>
+    </div>
+  </section>
+
+  <!-- 二 · 择阵 -->
+  <section id="phase-spread" class="phase hidden">
+    <div class="panel spread-panel">
+      <div class="eyebrow" id="spreadEyebrow">CHOOSE THE PATTERN</div>
+      <h2 class="title-zh" id="spreadTitle">择取牌阵</h2>
+      <div class="ornament"><i></i><b></b><i></i></div>
+      <div id="autoReason" class="auto-reason hidden"></div>
+      <div id="spreadList" class="spread-list"></div>
+      <div class="btn-row">
+        <button id="spreadBackBtn" class="btn ghost">回 到 问 询</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 三 · 仪式栏 -->
+  <div id="ritualBar" class="hidden">
+    <div class="ritual-inner">
+      <div class="ornament small"><i></i><b></b><i></i></div>
+      <div id="ritualHint">命运正在洗牌……</div>
+      <div id="ritualActions"></div>
+    </div>
+  </div>
+
+  <!-- 四 · 解读侧栏 -->
+  <aside id="readingPanel" class="hidden">
+    <div class="reading-head">
+      <div class="eyebrow">THE READING</div>
+      <h2 id="readingTitle">解读</h2>
+      <p id="readingQuestion" class="reading-question"></p>
+      <button id="chipsToggle" class="chips-toggle" type="button" aria-expanded="true">
+        <span>牌 面 一 览</span>
+        <i class="fold-caret"></i>
+      </button>
+      <div class="chips-wrap" id="chipsWrap">
+        <div id="readingChips" class="reading-chips"></div>
+      </div>
+    </div>
+    <div id="readingStream" class="reading-stream"></div>
+    <div class="reading-actions">
+      <button id="reReadBtn" class="btn ghost small">再 问 一 次</button>
+      <button id="copyReadBtn" class="btn ghost small">誊 抄</button>
+      <button id="newReadBtn" class="btn primary small">新 的 占 问</button>
+    </div>
+  </aside>
+
+  <!-- 卡牌细读 -->
+  <div id="cardDetail" class="hidden">
+    <button id="detailClose" class="detail-close">掩 卷</button>
+    <div class="detail-frame">
+      <img id="detailImg" alt="">
+      <div class="detail-body">
+        <div class="detail-pos" id="detailPos"></div>
+        <h3 id="detailName"></h3>
+        <div class="detail-sub" id="detailSub"></div>
+        <div class="detail-kw" id="detailKw"></div>
+        <p class="detail-meaning" id="detailMeaning"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 五 · 实景占卜 -->
+  <section id="photoPanel" class="phase hidden">
+    <div class="panel photo-panel">
+      <div class="eyebrow">PHYSICAL RITUAL</div>
+      <h2 class="title-zh">实景占卜</h2>
+      <div class="ornament"><i></i><b></b><i></i></div>
+      <p class="photo-note" id="photoNote">以你自己的塔罗牌静心抽牌，逐张拍照上传。神谕将识其牌名与正逆，再为你展开解读。</p>
+      <div id="dropzone" class="dropzone">
+        <div class="drop-inner">
+          <div class="drop-glyph"></div>
+          <div class="drop-text">将牌面照片放入此圣域，或点击选取</div>
+          <div class="drop-sub">支持多张 · 依上传顺序对应牌位</div>
+        </div>
+        <input type="file" id="photoInput" accept="image/*" multiple hidden>
+      </div>
+      <div id="photoRows" class="photo-rows"></div>
+      <div class="btn-row">
+        <button id="photoCancelBtn" class="btn ghost">收 起</button>
+        <button id="photoSpreadBtn" class="btn ghost">选 择 牌 阵</button>
+        <button id="photoReadBtn" class="btn primary" disabled>开 始 解 读</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 设置 · 神谕议会 -->
+  <aside id="settingsPanel" class="hidden">
+    <div class="settings-head">
+      <div class="eyebrow">THE ORACLES</div>
+      <h2>神谕议会</h2>
+      <button id="settingsClose" class="detail-close">闭 议</button>
+    </div>
+    <div class="settings-body">
+    <div id="dshBanner" class="dsh-banner hidden"></div>
+    <div id="providerList" class="provider-list"></div>
+    <div class="settings-section">
+      <div class="section-title">亲自延请一位神谕</div>
+      <div class="form-grid">
+        <input id="cpName" placeholder="名号（如 My Gateway）">
+        <select id="cpKind">
+          <option value="openai">OpenAI 兼容 · chat/completions</option>
+          <option value="responses">OpenAI Responses</option>
+          <option value="anthropic">Anthropic Messages</option>
+        </select>
+        <input id="cpBase" placeholder="Base URL（如 https://api.example.com/v1）">
+        <input id="cpKey" placeholder="API Key" type="password">
+        <button id="cpAdd" class="btn ghost small">载 入 议 会</button>
+      </div>
+      <p class="settings-note">自定义密钥仅保留在本页内存，刷新后需重新添加。问题、牌阵和实拍照片会发送到所选 AI 服务；密钥用于该服务认证。DSH 导入默认关闭，启用后仅读取，不修改登录态。请勿上传不愿分享的个人信息。</p>
+    </div>
+    </div>
+  </aside>
+
+  <div id="toasts"></div>
+</main>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

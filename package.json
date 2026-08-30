@@ -1,0 +1,21 @@
+{
+  "name": "tarot-ritual",
+  "version": "1.0.0",
+  "description": "ARCANUM — a local-first 3D tarot ritual with optional AI readings",
+  "private": true,
+  "scripts": {
+    "start": "node --use-env-proxy server.mjs",
+    "start:dsh": "node --use-env-proxy scripts/start-dsh.mjs",
+    "test": "node --test --test-timeout=30000",
+    "check": "node scripts/check.mjs"
+  },
+  "engines": { "node": ">=24.5.0" },
+  "keywords": ["tarot", "threejs", "local-first"],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "js-yaml": "^5.4.1",
+    "three": "^0.185.1"
+  }
+}

@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.woff2 binary
+*.png binary
+*.jpg binary
+# Preserve upstream vendored files and license text byte for byte.
+public/vendor/*.js -whitespace
+public/fonts/OFL-*.txt -whitespace
