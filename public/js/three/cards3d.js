@@ -3,6 +3,7 @@
 // ============================================================================
 import * as THREE from 'three';
 import { renderCardFace } from '../art/cardface.js';
+import { attachCanvasNavigation } from './canvas-navigation.js';
 
 const CARD_W = 1.6, CARD_H = 2.8, CARD_T = 0.05;
 const FAN_R = 13, FAN_BASE_Y = 0.5, FAN_SCALE = 0.62;
@@ -428,40 +429,19 @@ export function createRitual(stage) {
     pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   }, { passive: true });
 
-  // 拖拽平移画布：按住空白或卡牌拖动即可移动视野；松手时若未拖动则视为点选
-  const dragPan = { active: false, moved: false, sx: 0, sy: 0, bx: 0, by: 0 };
-  el.addEventListener('pointerdown', e => {
-    if (mode !== 'select' && mode !== 'layout') return;
-    dragPan.active = true; dragPan.moved = false;
-    dragPan.sx = e.clientX; dragPan.sy = e.clientY;
-    dragPan.bx = rig.base.x; dragPan.by = rig.base.y;
-    try { el.setPointerCapture(e.pointerId); } catch { }
-  });
-  el.addEventListener('pointermove', e => {
-    if (!dragPan.active) return;
-    const dx = e.clientX - dragPan.sx, dy = e.clientY - dragPan.sy;
-    if (!dragPan.moved && Math.hypot(dx, dy) > 6) {
-      dragPan.moved = true;
+  const navigation = attachCanvasNavigation({
+    element:el, camera, rig,
+    canPan:() => mode === 'select' || mode === 'layout',
+    canZoom:() => mode === 'layout',
+    onInteract:() => {
       setHovered(null);
-      el.style.cursor = 'grabbing';
-    }
-    if (!dragPan.moved) return;
-    const fov = camera.fov * Math.PI / 180;
-    const wpp = 2 * Math.tan(fov / 2) * Math.max(camera.position.z, 2) / window.innerHeight;
-    rig.base.x = THREE.MathUtils.clamp(dragPan.bx - dx * wpp, -9, 9);
-    rig.base.y = THREE.MathUtils.clamp(dragPan.by + dy * wpp, -6, 6);
+      for (const axis of ['x','y','z']) twain.kill(rig.base, axis);
+    },
+    onTap:() => {
+      if (hovered) onSelect && onSelect(hovered);
+      else onEmptyClick && onEmptyClick();
+    },
   });
-  const endPan = () => {
-    if (!dragPan.active) return;
-    const wasDrag = dragPan.moved;
-    dragPan.active = false; dragPan.moved = false;
-    el.style.cursor = 'default';
-    if (wasDrag || (mode !== 'select' && mode !== 'layout')) return;
-    if (hovered) onSelect && onSelect(hovered);
-    else onEmptyClick && onEmptyClick();
-  };
-  el.addEventListener('pointerup', endPan);
-  el.addEventListener('pointercancel', () => { dragPan.active = false; dragPan.moved = false; el.style.cursor = 'default'; });
 
   function layoutSlots(spread, scale) {
     return spread.slots.map((s, i) => ({
@@ -475,6 +455,7 @@ export function createRitual(stage) {
   }
 
   function fitCamera(spread, scale) {
+    navigation.reset();
     let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
     for (const s of spread.slots) {
       const c = Math.abs(Math.cos(s.rot || 0)), si = Math.abs(Math.sin(s.rot || 0));
@@ -505,6 +486,7 @@ export function createRitual(stage) {
   }
 
   function resetCamera() {
+    navigation.reset();
     twain.to(rig.base, 'x', 0, 1.2, 'inOutSine');
     twain.to(rig.base, 'y', 0, 1.2, 'inOutSine');
     twain.to(rig.base, 'z', 17, 1.2, 'inOutSine');
@@ -570,7 +552,7 @@ export function createRitual(stage) {
     }
 
     // 悬停检测（拖拽中暂停）
-    if ((mode === 'select' || mode === 'layout') && !(dragPan.active && dragPan.moved)) {
+    if ((mode === 'select' || mode === 'layout') && !navigation.isInteracting) {
       raycaster.setFromCamera(pointer, camera);
       const meshes = (mode === 'select' ? fanEntries() : cards.filter(e => e.state === 'drawn'))
         .map(e => e.mesh);

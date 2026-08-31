@@ -31,7 +31,7 @@ body {
 }
 ::selection { background: rgba(212, 176, 115, 0.28); }
 
-#stage { position: fixed; inset: 0; display: block; }
+#stage { position: fixed; inset: 0; display: block; touch-action: none; }
 #veil {
   position: fixed; inset: 0; background: var(--ink-0);
   z-index: 60; pointer-events: none;

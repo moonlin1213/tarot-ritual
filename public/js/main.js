@@ -425,6 +425,7 @@ function chipsHtml() {
 }
 
 function startReading() {
+  hint('可拖动画布 · 双指捏合或滚轮缩放 · 点选牌面查看详情');
   $('#readingTitle').textContent = S.spread.zh;
   $('#readingQuestion').textContent = S.question ? `「${S.question}」` : '「愿牌语直指当下最需要看见之事」';
   chipsHtml();
