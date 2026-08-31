@@ -141,6 +141,18 @@ scripts/            Portable startup and syntax checks
 test/               Isolated regression tests
 ```
 
+## Artwork rights and local customization
+
+**The cat tarot artwork is not uploaded or distributed with this project because permission for public redistribution has not been obtained.** The open-source version retains its procedural particle artwork and works without any additional images. Free downloads on Pinterest or other platforms do not establish permission to reupload, bundle, or redistribute an entire deck. The code's ISC license does not cover those third-party images.
+
+After downloading the code, you can customize both card faces and backs locally with artwork you like and have permission to use. **The current public version has no one-click image upload or deck-switching interface: local rendering code must be modified. Simply placing images in a directory will not replace the artwork.** Development entry points:
+
+- Faces: adapt `renderCardFace(card)` in [`public/js/art/cardface.js`](public/js/art/cardface.js) to draw preloaded local images onto Canvas by `card.id`, preserving its Canvas return interface. Both the 3D cards and the detail view use this function.
+- Backs: adapt `backMaterial()` in [`public/js/three/cards3d.js`](public/js/three/cards3d.js). When replacing the shader with a static texture material, also adjust the animation loop's `uniforms.uTime` update so it does not access a missing shader uniform.
+- Use a consistent **512 × 896** canvas, preserve image aspect ratios, and use PNG for transparent rounded corners. Follow the 78-card ID mapping in [`public/data/cards.js`](public/data/cards.js) without changing draw data or upright/reversed semantics. Serve images locally and preload them before creating the cards.
+
+Local customization does not grant public redistribution rights. Check the artwork's license; if you share a modified repository, website, or package, include only assets licensed for that use and follow attribution and other conditions. Add private, local-only image directories to your own `.gitignore` to help prevent accidental commits.
+
 ## License
 
 Project code retains its original [ISC license](LICENSE). Three.js uses MIT; Cinzel and Cormorant Garamond use SIL OFL 1.1. See [third-party notices](THIRD_PARTY_NOTICES.md). Procedural card art is an abstract interpretation of traditional symbolism, not scanned artwork from a commercial deck.
