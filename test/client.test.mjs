@@ -84,21 +84,27 @@ test('settings truthfully distinguish optional credential renewal from read-only
   assert.match(nodes.get('#dshConsentNote')?.textContent || '',/只读/);
 });
 
-test('overlapping card arrivals trigger one reading only after every card arrives', async () => {
+test('overlapping card arrivals reveal together once and read only after the reveal completes', async () => {
   const src = (await fs.readFile(new URL('../public/js/main.js', import.meta.url), 'utf8'))
     .replace(/import[\s\S]*?from\s+['"][^'"]+['"];\n/g, '').replace(/boot\(\);\s*$/, '');
-  const callbacks = [], elements = new Map();
+  const callbacks = [], reveals = [], elements = new Map();
   const element = () => ({ classList: { toggle() {}, add() {}, remove() {} }, appendChild() {}, textContent: '', innerHTML: '' });
   const context = vm.createContext({
     Math, setTimeout, clearTimeout,
     document: { querySelector: s => { if (!elements.has(s)) elements.set(s, element()); return elements.get(s); } },
-    window: { __ritual: { layoutSlots: () => [{}, {}, {}], fitCamera() {}, flyToSlot: (e, s, cb) => callbacks.push(cb), endSelection() {} } },
+    window: { __ritual: { layoutSlots: () => [{}, {}, {}], fitCamera() {}, flyToSlot: (e, s, cb) => callbacks.push(cb), endSelection() {}, revealTogether:(entries,cb)=>reveals.push({entries,cb}) } },
   });
   vm.runInContext(src + '\nS.phase="select"; S.spread={count:3,slots:[{},{},{}]}; var reads=0; startReading=()=>{reads++};', context);
   vm.runInContext('drawCard({card:{}}); drawCard({card:{}}); drawCard({card:{}});', context);
   callbacks[1]();
   assert.equal(vm.runInContext('reads', context), 0);
   callbacks[0](); callbacks[2]();
+  assert.equal(vm.runInContext('reads', context), 0, 'landing is not the end of the reveal');
+  assert.equal(reveals.length,1);
+  assert.equal(reveals[0].entries.length,3);
+  callbacks[2]();
+  assert.equal(reveals.length,1);
+  reveals[0].cb(); reveals[0].cb();
   assert.equal(vm.runInContext('reads', context), 1);
 });
 

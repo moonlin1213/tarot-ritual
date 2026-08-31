@@ -11,6 +11,7 @@ Runs on **Windows, macOS, and Linux**. No frontend build step and no credentials
 - All 78 Rider–Waite–Smith cards with built-in upright/reversed interpretations and symbolic descriptions.
 - Five spreads: One Card, Three Card, Five Card Relationship, Seven Card Horseshoe, and Celtic Cross.
 - Spread recommendations based on Chinese question keywords, with manual selection available.
+- Manual and automatic draws land face-down; the complete spread flips together before the AI reading starts.
 - Three.js shuffling, fan selection, flying cards, reveals, drag-to-pan navigation, and card details.
 - Pinch or scroll over the reading canvas to zoom from 0.5× to 4×, with drag-to-pan retained. The reading panel scrolls independently; a new reading resets the view.
 - Three AI protocols: OpenAI-compatible Chat Completions, Responses, and Anthropic Messages.

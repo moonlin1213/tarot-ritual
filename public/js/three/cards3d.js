@@ -216,7 +216,8 @@ export function createRitual(stage) {
 
   const cards = [];
   let fanSink = 0; // 已抽取张数：剩余扇形随之下沉、缩小、退场
-  let mode = 'idle'; // idle | intro | fan | shuffle | select | layout
+  let mode = 'idle'; // idle | intro | fan | shuffle | select | revealing | layout
+  let generation = 0;
   let hovered = null;
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2(-2, -2);
@@ -290,6 +291,8 @@ export function createRitual(stage) {
 
   // ---- 公开 API ----
   function build(deck) {
+    generation++;
+    mode = 'idle';
     fanSink = 0;
     cards.length = 0;
     while (group.children.length) group.remove(group.children[0]);
@@ -318,6 +321,7 @@ export function createRitual(stage) {
   }
 
   function shuffle(onDone) {
+    generation++;
     fanSink = 0;
     mode = 'shuffle';
     onShuffleDone = onDone;
@@ -348,6 +352,8 @@ export function createRitual(stage) {
   function refan() { dealFan(fanEntries()); }
 
   function flyToSlot(entry, slotWorld, onDone) {
+    const flightGeneration = generation;
+    entry.pendingReveal = null;
     entry.state = 'drawn';
     fanSink += 1;
     entry.mesh.visible = true;
@@ -364,8 +370,19 @@ export function createRitual(stage) {
     const p1 = p0.clone().lerp(p2, 0.5); p1.y += 3.4; p1.z += 4.5;
     const rotObj = { v: m.rotation.z };
     const dur = 1.0;
+    if (slotWorld.deferReveal) {
+      m.rotation.y = Math.PI;
+      twain.to(m.scale, 'x', slotWorld.scale, dur, 'outQuart');
+      twain.to(m.scale, 'y', slotWorld.scale, dur, 'outQuart');
+    }
     twain.to(rotObj, 'v', slotWorld.rot, dur, 'inOutSine');
     twain.to({ v: 0 }, 'v', 0, dur, 'outQuart', () => {
+      if (flightGeneration !== generation) return;
+      if (slotWorld.deferReveal) {
+        entry.pendingReveal = slotWorld;
+        onDone && onDone();
+        return;
+      }
       // 到位：翻牌显面
       twain.to(m.rotation, 'y', 0, 0.55, 'outQuart', () => {
         bursts.spawn(p2, '#e8c98a', 130);
@@ -388,6 +405,34 @@ export function createRitual(stage) {
     });
     setTimeout(() => { if (mode !== 'layout') refan(); }, dur * 700);
     return entry;
+  }
+
+  // 所有牌落定后统一翻开；旧牌局的延时或完成回调不能启动新解读。
+  function revealTogether(entries, onDone) {
+    if (mode === 'revealing' || !entries.length || new Set(entries).size !== entries.length
+      || entries.some(e => !cards.includes(e) || !e.pendingReveal)) return false;
+    const revealGeneration = generation;
+    const batch = entries.map(entry => ({entry, slot:entry.pendingReveal}));
+    batch.forEach(({entry}) => { entry.pendingReveal = null; });
+    setHovered(null);
+    mode = 'revealing';
+    setTimeout(() => {
+      if (generation !== revealGeneration || mode !== 'revealing') return;
+      let remaining = batch.length;
+      for (const {entry, slot} of batch) {
+        const m = entry.mesh;
+        twain.to(m.rotation, 'y', 0, .75, 'inOutSine', () => {
+          if (generation !== revealGeneration || mode !== 'revealing') return;
+          bursts.spawn(slot.pos, '#e8c98a', 130);
+          if (--remaining === 0) { mode = 'layout'; onDone && onDone(); }
+        });
+        twain.to(m.rotation, 'z', slot.rot + (slot.reversed ? Math.PI : 0), .75, 'inOutSine');
+        twain.to(m.scale, 'x', slot.scale, .75, 'outBack');
+        twain.to(m.scale, 'y', slot.scale, .75, 'outBack');
+        twain.to(m.position, 'z', slot.pos.z + .1, .75, 'outQuart');
+      }
+    }, 300);
+    return true;
   }
 
   function setHovered(entry) {
@@ -569,7 +614,7 @@ export function createRitual(stage) {
 
   return {
     build, intro, shuffle, beginSelection, endSelection,
-    flyToSlot, layoutSlots, fitCamera, resetCamera, refan,
+    flyToSlot, revealTogether, layoutSlots, fitCamera, resetCamera, refan,
     set onSelect(cb) { onSelect = cb; },
     set onHover(cb) { onHover = cb; },
     set onEmptyClick(cb) { onEmptyClick = cb; },

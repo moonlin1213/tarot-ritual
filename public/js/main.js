@@ -367,7 +367,7 @@ function startRitual() {
 function handleCardClick(entry) {
   if (S.phase === 'select' && entry.state === 'fan') {
     drawCard(entry);
-  } else if ((S.phase === 'reading' || S.phase === 'reveal') && entry.state === 'drawn') {
+  } else if (S.phase === 'reading' && entry.state === 'drawn') {
     if (S.detailEntry === entry) closeCardDetail();
     else showCardDetail(entry);
   }
@@ -385,24 +385,34 @@ function drawCard(entry) {
   const placed = { entry, card: entry.card, reversed: Math.random() < 0.28, slot: S.spread.slots[idx], slotWorld };
   S.placed.push(placed);
   window.__ritual.fitCamera(S.spread, S.scale);
-  window.__ritual.flyToSlot(entry, { ...slotWorld, reversed: placed.reversed }, () => {
+  window.__ritual.flyToSlot(entry, { ...slotWorld, reversed: placed.reversed, deferReveal: true }, () => {
     placed.arrived = true;
     if (S.phase !== 'select' || !S.placed.includes(placed)) return;
     if (S.placed.length === S.spread.count && S.placed.every(p => p.arrived)) {
+      const batch = S.placed;
+      clearTimeout(S.autoTimer);
       window.__ritual.endSelection();
-      setPhase('reading');
-      startReading();
+      setPhase('reveal');
+      hint('牌已齐备。屏息，共同揭晓……');
+      actions();
+      window.__ritual.revealTogether(batch.map(p => p.entry), () => {
+        if (S.phase !== 'reveal' || S.placed !== batch) return;
+        setPhase('reading');
+        startReading();
+      });
     } else {
-      hint(`以手择牌 · 尚余 ${S.spread.count - S.placed.length} 张 · 可拖动画布`);
+      const remaining = S.spread.count - S.placed.length;
+      hint(remaining ? `以手择牌 · 尚余 ${remaining} 张 · 抽齐后一起揭晓` : '牌已选齐，静候落定……');
     }
   });
   hint(`第 ${idx + 1} 张 · 「${placed.slot.label}」之位已定`);
-  if (S.placed.length >= S.spread.count) actions();
+  if (S.placed.length >= S.spread.count) { actions(); hint('牌已选齐，静候落定……'); }
 }
 
 function autoDraw() {
+  const batch = S.placed;
   const tick = () => {
-    if (S.placed.length >= S.spread.count) return;
+    if (S.phase !== 'select' || S.placed !== batch || S.placed.length >= S.spread.count) return;
     const rest = window.__ritual.cards.filter(e => e.state === 'fan');
     if (!rest.length) return;
     drawCard(rest[Math.floor(Math.random() * rest.length)]);
