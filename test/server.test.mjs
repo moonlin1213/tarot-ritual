@@ -72,9 +72,37 @@ test('rejects cross-origin requests before loading credentials', async () => {
 test('requires an explicit request header on credential-bearing API routes', async () => {
   const r = await fetch(base + '/api/dsh'); assert.equal(r.status, 403);
 });
-test('DSH discovery requires process-level opt-in', async () => {
+test('DSH discovery is disabled before explicit import', async () => {
   const r = await fetch(base + '/api/dsh', { headers }); const j = await r.json();
   assert.equal(j.found, false); assert.deepEqual(j.providers, []);
+});
+test('DSH import rejects missing consent, cross-origin requests and missing request markers', async () => {
+  assert.equal((await fetch(base + '/api/dsh/import', { headers })).status, 405);
+  assert.equal((await post('/api/dsh/import', {})).status, 400);
+  assert.equal((await post('/api/dsh/import', { consent: true }, { Origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await fetch(base + '/api/dsh/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"consent":true}' })).status, 403);
+  const state = await (await fetch(base + '/api/dsh', { headers })).json();
+  assert.equal(state.enabled, false);
+});
+test('explicit import enables DSH metadata and credential use without restarting or editing DSH files', async () => {
+  const credentialFile = path.join(dir, '.dsh', '.credentials.yaml');
+  const before = await fs.readFile(credentialFile, 'utf8');
+  const count = calls.length;
+  const r = await post('/api/dsh/import', { consent: true });
+  assert.equal(r.status, 200);
+  const metadata = await r.text();
+  const imported = JSON.parse(metadata);
+  assert.equal(imported.enabled, true);
+  assert.equal(imported.providers[0].id, 'dsh:fixture');
+  assert.ok(!metadata.includes('test-secret'));
+  assert.equal(calls.length, count, 'import itself must not contact a provider');
+  assert.equal((await (await fetch(base + '/api/dsh', { headers })).json()).enabled, true);
+  const models = await post('/api/models', { providerId: 'dsh:fixture' });
+  assert.deepEqual((await models.json()).models, ['fixture']);
+  assert.equal(calls.at(-1).headers.authorization, 'Bearer test-secret');
+  assert.equal(await fs.readFile(credentialFile, 'utf8'), before);
+  const again = await (await post('/api/dsh/import', { consent: true })).json();
+  assert.equal(again.providers.length, 1, 'reimport must not duplicate providers');
 });
 test('static files cannot escape through sibling prefixes or symlinks', async () => {
   for (const name of ['/..%2fpublic-private/private.txt', '/outside/private.txt']) {

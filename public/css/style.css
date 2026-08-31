@@ -401,6 +401,7 @@ body {
 }
 .settings-head h2 { font-size: 20px; letter-spacing: 0.3em; margin-top: 10px; color: var(--gold-bright); font-weight: 600; }
 .settings-head .detail-close { position: absolute; right: 0; top: 6px; }
+.dsh-import-actions { margin-bottom: 22px; }
 .dsh-banner {
   margin: 18px 0; padding: 14px 16px; border: 1px solid var(--gold-faint);
   background: rgba(212, 176, 115, 0.05); font-size: 12.5px; color: var(--ivory-dim);

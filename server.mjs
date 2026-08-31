@@ -137,13 +137,16 @@ const API_KIND = {
   'openai-responses': 'responses',
   'anthropic-messages': 'anthropic',
 };
+// Consent can come from startup configuration or the same-origin import button.
+// Button consent lives only for this local server process, never in DSH files.
+let dshImportEnabled = process.env.TAROT_DSH_IMPORT === '1';
 
 function loadDsh() {
-  if (process.env.TAROT_DSH_IMPORT !== '1') return { found: false, enabled: false, providers: [] };
+  if (!dshImportEnabled) return { found: false, enabled: false, providers: [] };
   const settings = readYamlSafe(path.join(DSH_DIR, 'settings.yaml'));
   const creds = readYamlSafe(path.join(DSH_DIR, '.credentials.yaml'));
   const oauthFile = readJsonSafe(path.join(DSH_DIR, '.everything-oauth.json'));
-  if (!settings && !oauthFile && !creds) return { found: false, providers: [] };
+  if (!settings && !oauthFile && !creds) return { found: false, enabled: true, providers: [] };
 
   const refs = creds?.refs || {};
   const providers = [];
@@ -451,6 +454,13 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/health' && req.method === 'GET') { json(res, 200, { ok: true }); return; }
     if (pathname.startsWith('/api/')) {
       if (req.headers['x-tarot-request'] !== '1') throw fail(403, '缺少同源请求标记');
+      if (pathname === '/api/dsh/import') {
+        if (req.method !== 'POST') throw fail(405, 'Method Not Allowed');
+        const body = await readBody(req);
+        if (body.consent !== true) throw fail(400, '请先确认导入本机 DSH 配置');
+        dshImportEnabled = true;
+        json(res, 200, loadDsh()); return;
+      }
       if (pathname === '/api/dsh') {
         if (req.method !== 'GET') throw fail(405, 'Method Not Allowed');
         json(res, 200, loadDsh()); return;

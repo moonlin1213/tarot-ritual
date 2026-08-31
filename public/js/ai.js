@@ -38,6 +38,18 @@ export async function loadDsh() {
   return providerState.dsh;
 }
 
+export async function importDsh() {
+  const r = await fetch('/api/dsh/import', {
+    method: 'POST', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', 'X-Tarot-Request': '1' },
+    body: JSON.stringify({ consent: true }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!r.ok) throw new Error('DSH 导入失败，请检查本地服务后重试');
+  providerState.dsh = await r.json();
+  return providerState.dsh;
+}
+
 export function allProviders() {
   const dsh = providerState.dsh.providers || [];
   const custom = providerState.custom.map(c => ({ ...c, id: 'custom:' + c.id, source: '手动' }));

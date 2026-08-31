@@ -6,6 +6,28 @@ import vm from 'node:vm';
 // Browser APIs are replaced only at the I/O boundary; run the actual client.
 for (const file of ['ai.js', 'core.js']) {
   const client = await import(`../public/js/${file}`);
+  test(`${file}: explicit DSH import posts consent and updates the usable provider list`, async () => {
+    assert.equal(typeof client.importDsh, 'function', 'one-click DSH import is missing');
+    let request;
+    globalThis.fetch = async (url, init) => {
+      request = { url, init };
+      return Response.json({ enabled: true, found: true, providers: [{ id: 'dsh:fixture', kind: 'openai', label: 'Fixture', models: ['model-a'], hasKey: true }] });
+    };
+    const result = await client.importDsh();
+    assert.equal(request.url, '/api/dsh/import');
+    assert.equal(request.init.method, 'POST');
+    assert.equal(request.init.headers['X-Tarot-Request'], '1');
+    assert.deepEqual(JSON.parse(request.init.body), { consent: true });
+    assert.equal(result.enabled, true);
+    assert.equal(client.getProvider('dsh:fixture').models[0], 'model-a');
+  });
+  test(`${file}: failed DSH import preserves prior providers and reports the failure`, async () => {
+    assert.equal(typeof client.importDsh, 'function', 'one-click DSH import is missing');
+    client.providerState.dsh = { found: true, providers: [{ id: 'dsh:existing' }] };
+    globalThis.fetch = async () => Response.json({ error: 'local error' }, { status: 500 });
+    await assert.rejects(client.importDsh());
+    assert.equal(client.providerState.dsh.providers[0].id, 'dsh:existing');
+  });
   test(`${file}: custom credentials never persist, including legacy migration`, () => {
     const storage = new Map([['arcana.customProviders.v1', JSON.stringify([{ id: 'legacy', apiKey: 'test-secret' }])]]);
     globalThis.localStorage = { getItem: k => storage.get(k), setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) };

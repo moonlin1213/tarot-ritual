@@ -14,7 +14,7 @@ Runs on **Windows, macOS, and Linux**. No frontend build step and no credentials
 - Three.js shuffling, fan selection, flying cards, reveals, drag-to-pan navigation, and card details.
 - Three AI protocols: OpenAI-compatible Chat Completions, Responses, and Anthropic Messages.
 - Physical card recognition: locally resize a photo, send it to your chosen vision model, then correct the card or orientation manually if needed.
-- Optional, read-only DSH configuration import, disabled by default. No account configuration is included.
+- One-click, read-only import of local DSH providers from Settings. No account configuration is included.
 
 Tarot and AI output are for entertainment and reflection. They are not factual predictions or a substitute for medical, legal, or financial advice. Interpretations and astrological correspondences vary between traditions; this project uses one set of conventions.
 
@@ -58,7 +58,9 @@ Choose a model that supports the selected protocol. Photo recognition additional
 
 ### Optional DSH import
 
-Only if you want to reuse your DSH configuration, run:
+After a normal `npm start`, open Settings (the oracle button in the top-right corner) and click **“导入本机 DSH” (Import local DSH)**. No manual provider entry, environment-variable edit, or server restart is needed. Consent survives page refreshes for the current server process; click again after restarting the server. The same button can reimport updated DSH configuration.
+
+To automatically import on every startup, the existing shortcut remains available:
 
 ```sh
 npm run start:dsh
@@ -92,7 +94,7 @@ macOS/Linux:
 PORT=8643 TAROT_DSH_DIR="$HOME/.dsh" npm run start:dsh
 ```
 
-You may also enable import with `TAROT_DSH_IMPORT=1`. A normal `npm start` does not read DSH unless you have already set that variable in your environment. The project does not automatically load `.env` files.
+You may also enable import with `TAROT_DSH_IMPORT=1`. A normal `npm start` does not read DSH until you click Import, unless that variable is set. Button consent stays in the current server process and never modifies DSH configuration or credentials. The project does not automatically load `.env` files.
 
 ### Proxies
 

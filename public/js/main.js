@@ -5,7 +5,7 @@ import { createStage } from './three/stage.js';
 import { createRitual } from './three/cards3d.js';
 import {
   DECK, byId, SPREADS, autoSpread,
-  providerState, initProviderState, loadDsh, allProviders, getProvider,
+  providerState, initProviderState, loadDsh, importDsh, allProviders, getProvider,
   addCustomProvider, removeCustomProvider, selectProvider, setModel,
   currentModel, fetchModels, chat,
   buildReadingMessages, buildIdentifyMessages, mdToHtml,
@@ -89,8 +89,8 @@ function selectedProvider() {
   return getProvider(providerState.selectedId);
 }
 
-async function refreshProviders() {
-  const dsh = await loadDsh().catch(() => ({ found: false, providers: [] }));
+async function refreshProviders(imported = null) {
+  const dsh = imported || await loadDsh().catch(() => ({ found: false, enabled: false, providers: [] }));
   const banner = $('#dshBanner');
   if (dsh.found && dsh.providers.length) {
     banner.classList.remove('hidden');
@@ -98,7 +98,7 @@ async function refreshProviders() {
     banner.innerHTML = `已从 <b>DSH · DeepSeek Harness</b> 接引 ${dsh.providers.length} 位神谕（含 ${oauthN} 位 OAuth 登录态）。凭据不返回浏览器，仅发送至所选 AI 服务。`;
   } else {
     banner.classList.remove('hidden');
-    banner.textContent = dsh.enabled === false ? 'DSH 导入默认关闭。可手动添加服务，或按 README 主动开启只读导入。' : '本机未发现可用的 DSH 配置，可于下方手动添加服务。';
+    banner.textContent = dsh.enabled === false ? '尚未导入 DSH。点击下方按钮，即可读取本机已有的 Provider，无需逐个填写。' : '本机未发现可用的 DSH Provider。请先在 DSH 中配置，再点击重新导入。';
   }
   // 默认选择：优先有模型的 DSH provider
   if (!providerState.selectedId || !getProvider(providerState.selectedId)) {
@@ -107,6 +107,8 @@ async function refreshProviders() {
   }
   renderProviderList();
   updateOrb();
+  $('#dshImportBtn').textContent = dsh.enabled ? '重新导入 DSH' : '导入本机 DSH';
+  $('#dshImportBtn').disabled = false;
 }
 
 function renderProviderList() {
@@ -220,6 +222,20 @@ function updateOrb() {
 function wireSettings() {
   $('#providerOrb').addEventListener('click', () => $('#settingsPanel').classList.toggle('open'));
   $('#settingsClose').addEventListener('click', () => $('#settingsPanel').classList.remove('open'));
+  $('#dshImportBtn').addEventListener('click', async () => {
+    const button = $('#dshImportBtn');
+    if (button.disabled) return;
+    button.disabled = true;
+    button.textContent = '正在导入…';
+    try {
+      const dsh = await importDsh();
+      await refreshProviders(dsh);
+      toast(dsh.providers.length ? `已导入 ${dsh.providers.length} 个 DSH Provider` : '尚未找到可用的 DSH Provider，请检查 DSH 配置。');
+    } catch (error) {
+      toast(error.message, true);
+      button.textContent = '重试导入 DSH';
+    } finally { button.disabled = false; }
+  });
   $('#cpAdd').addEventListener('click', async () => {
     const label = $('#cpName').value.trim();
     const kind = $('#cpKind').value;
