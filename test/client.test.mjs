@@ -46,6 +46,16 @@ for (const file of ['ai.js', 'core.js']) {
     assert.equal(JSON.parse(request.init.body).provider.apiKey, 'test-secret');
     assert.equal(request.init.headers['X-Tarot-Request'], '1');
   });
+  test(`${file}: a page reload restores the selected Codex model without storing its credentials`,()=>{
+    const storage=new Map();
+    globalThis.localStorage={getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
+    client.selectProvider('dsh:codex-oauth','gpt-5.6-sol');
+    client.providerState.selectedId=null;client.providerState.modelByProvider={};
+    client.initProviderState();
+    assert.equal(client.providerState.selectedId,'dsh:codex-oauth');
+    assert.equal(client.currentModel('dsh:codex-oauth'),'gpt-5.6-sol');
+    assert.deepEqual(JSON.parse(storage.get('arcana.selectedProvider.v1')),{id:'dsh:codex-oauth',models:{'dsh:codex-oauth':'gpt-5.6-sol'}});
+  });
   test(`${file}: completion is delivered exactly once`, async () => {
     globalThis.fetch = async () => new Response('data: {"t":"delta","v":"hello"}\n\ndata: {"t":"done"}\n\n');
     const done = [], deltas = [];
@@ -61,6 +71,18 @@ for (const file of ['ai.js', 'core.js']) {
     assert.equal(errors.length, 1);
   });
 }
+
+test('settings truthfully distinguish optional credential renewal from read-only import',async()=>{
+  const src=(await fs.readFile(new URL('../public/js/main.js',import.meta.url),'utf8')).replace(/import[\s\S]*?from\s+['"][^'"]+['"];\n/g,'').replace(/boot\(\);\s*$/,'');
+  const nodes=new Map();
+  const context=vm.createContext({document:{querySelector:s=>{if(!nodes.has(s))nodes.set(s,{classList:{add(){},remove(){}},textContent:''});return nodes.get(s);}},providerState:{selectedId:'existing'},getProvider:()=>({})});
+  vm.runInContext(src+'\nrenderProviderList=()=>{}; updateOrb=()=>{};',context);
+  await vm.runInContext('refreshProviders({enabled:true,found:false,providers:[],oauthRefreshEnabled:true})',context);
+  assert.match(nodes.get('#dshConsentNote')?.textContent || '',/续期/);
+  assert.match(nodes.get('#dshConsentNote')?.textContent || '',/更新/);
+  await vm.runInContext('refreshProviders({enabled:true,found:false,providers:[],oauthRefreshEnabled:false})',context);
+  assert.match(nodes.get('#dshConsentNote')?.textContent || '',/只读/);
+});
 
 test('overlapping card arrivals trigger one reading only after every card arrives', async () => {
   const src = (await fs.readFile(new URL('../public/js/main.js', import.meta.url), 'utf8'))

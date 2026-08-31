@@ -68,7 +68,9 @@ npm run start:dsh
 
 The default directory is based on the operating system's home directory: typically `%USERPROFILE%\.dsh` on Windows or `~/.dsh` on macOS/Linux. The server reads `settings.yaml`, `.credentials.yaml`, and `.everything-oauth.json` without writing them back. It returns provider/model metadata to the browser, never API keys, access tokens, or refresh tokens.
 
-When an OAuth access token expires, refresh it or sign in again through DSH and retry. This application does not refresh tokens, rotate refresh tokens, or implement an OAuth login flow. Some OAuth services do not offer model discovery; enter a supported model ID manually. DSH file formats are an external compatibility surface and may require future adapter updates.
+In the default read-only mode, refresh an expired OAuth token or sign in again through DSH and retry. This application does not implement an OAuth login flow. Some OAuth services do not offer model discovery; enter a supported model ID manually. DSH file formats are an external compatibility surface and may require future adapter updates.
+
+For an explicitly configured local installation, set `TAROT_DSH_OAUTH_REFRESH=1` and point `TAROT_DSH_OAUTH_MODULE` to the **absolute path** of an installed `dsh-everything-oauth/lib/index.js`. Codex requests can then use DSH's existing credential manager, shared file lock, and atomic writes for on-demand renewal. Startup and import do not refresh tokens. **This mode may update DSH credentials and is not strictly read-only**; other providers are not automatically renewed. Missing dependencies or invalid authorization produce an actionable error without clearing credentials or retrying model requests. Rotating a refresh token shared with another client may affect that client's login. Settings show whether renewal is enabled.
 
 To change the port or DSH directory:
 

@@ -21,7 +21,18 @@ before(async () => {
     if (mode === 'redirect') { res.writeHead(307, { Location: upstreamBase + '/stolen' }); res.end(); return; }
     if (mode === 'error') { res.writeHead(401); res.end(JSON.stringify({ error: { message: 'leaked test-secret' } })); return; }
     if (req.url.endsWith('/models')) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'fixture' }] })); return; }
-    res.setHeader('Content-Type', 'text/event-stream');
+    if (mode === 'missing-html') { res.end('<html>test-secret error page</html>'); return; }
+    if (mode === 'missing-json') { res.end('{"error":"test-secret"}'); return; }
+    if (mode === 'missing-garbage') { res.end('not SSE\n\ndata: {"type":"response.output_text.delta","delta":"bad"}\n\n'); return; }
+    if (mode === 'missing-oversize') { res.end(':' + ' '.repeat(70000)); return; }
+    if (mode === 'missing-unknown') { res.end('data: {"secret":"test-secret"}\n\n'); return; }
+    if (!mode.startsWith('missing-')) res.setHeader('Content-Type', mode === 'wrong-type' ? 'text/html' : 'text/event-stream');
+    if (mode === 'missing-fragmented') {
+      res.write(': keepalive\r\n\r\nevent: response.created\r\ndata: {"type":"response.created"}\r\n\r\nda');
+      await new Promise(r => setTimeout(r, 5));
+      res.write('ta: {"type":"response.output_text.delta","delta":"hello"}\r\n\r\n');
+      res.end('data: {"type":"response.completed"}\r\n\r\n'); return;
+    }
     const events = req.url.endsWith('/responses')
       ? [{ type: 'response.output_text.delta', delta: 'hello' }, { type: 'response.completed' }]
       : req.url.endsWith('/messages')
@@ -131,6 +142,26 @@ test('Responses assistant history uses output_text content', async () => {
   await (await post('/api/chat', b)).text();
   assert.equal(calls.at(-1).body.input[1].content[0].type, 'output_text');
 });
+test('missing Content-Type still accepts bounded, fragmented valid Responses events', async () => {
+  mode = 'missing-fragmented';
+  try {
+    const text = await (await post('/api/chat', chatBody('responses'))).text();
+    assert.match(text, /"v":"hello"/);
+    assert.ok(!text.includes('"t":"error"'), text);
+    assert.match(text, /"t":"done"/);
+  } finally { mode = 'normal'; }
+});
+for (const invalid of ['missing-html', 'missing-json', 'missing-garbage', 'missing-oversize', 'missing-unknown', 'wrong-type']) {
+  test(`untyped-stream validation rejects ${invalid} without leaking raw errors`, async () => {
+    mode = invalid;
+    try {
+      const text = await (await post('/api/chat', chatBody('responses'))).text();
+      assert.match(text, /"t":"error"/);
+      assert.ok(!text.includes('test-secret'));
+      assert.ok(!text.includes('"t":"delta"'));
+    } finally { mode = 'normal'; }
+  });
+}
 test('Anthropic base URLs ending /v1 do not duplicate the segment', async () => {
   const b = chatBody('anthropic'); b.provider.baseURL += '/v1';
   await (await post('/api/chat', b)).text(); assert.equal(calls.at(-1).url, '/v1/messages');
@@ -147,6 +178,10 @@ test('malformed URL returns 400 and leaves the server healthy', async () => {
   let status;
   try { status = (await fetch(base + '/%E0%A4%A')).status; } catch { status = 0; }
   assert.equal(status, 400); assert.equal((await fetch(base + '/api/health')).status, 200);
+});
+test('health identifies this service so the launcher cannot open another app on the port', async()=>{
+  const r=await fetch(base+'/api/health');assert.equal(r.headers.get('x-tarot-service'),'tarot-ritual');
+  assert.deepEqual(await r.json(),{ok:true});
 });
 
 test('DSH opt-in imports metadata and uses keys without exposing or refreshing credentials', async () => {

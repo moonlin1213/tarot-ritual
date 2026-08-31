@@ -4,7 +4,7 @@
 //  - /api/dsh      显式启用后只读导入 DSH；凭据不返回浏览器
 //  - /api/chat     多协议流式代理：openai-completions / openai-responses / anthropic-messages
 //  - /api/models   模型列表探测
-//  - OAuth 过期后由 DSH 刷新；本服务不修改登录态
+//  - 默认只读 OAuth；可显式委托本机 DSH 共享凭据管理器续期 Codex
 // ============================================================================
 import http from 'node:http';
 import fs from 'node:fs';
@@ -140,6 +140,8 @@ const API_KIND = {
 // Consent can come from startup configuration or the same-origin import button.
 // Button consent lives only for this local server process, never in DSH files.
 let dshImportEnabled = process.env.TAROT_DSH_IMPORT === '1';
+const dshOAuthRefreshEnabled = process.env.TAROT_DSH_OAUTH_REFRESH === '1';
+let sharedCodexResolver;
 
 function loadDsh() {
   if (!dshImportEnabled) return { found: false, enabled: false, providers: [] };
@@ -182,7 +184,7 @@ function loadDsh() {
   // 2) OAuth 登录态（.everything-oauth.json）
   const oc = oauthFile?.credentials || {};
   const routes = oauthFile?.routes || {};
-  const codexCred = oc['codex-oauth'] || oc['openai-codex'] || null;
+  const codexCred = oc['openai-codex'] || oc['codex-oauth'] || null;
   if (codexCred?.type === 'oauth') {
     const route = routes['codex-oauth'] || {};
     providers.push({
@@ -210,7 +212,7 @@ function loadDsh() {
   }
   // gemini-oauth 与 settings 中的 gemini 重复（同一 GEMINI_API_KEY），不重复导入
 
-  return { found: true, enabled: true, providers };
+  return { found: true, enabled: true, oauthRefreshEnabled: dshOAuthRefreshEnabled, providers };
 }
 
 function resolveCredential(pid, dsh) {
@@ -218,7 +220,7 @@ function resolveCredential(pid, dsh) {
   if (!p) return null;
   if (p.oauth === 'codex') {
     const oc = readJsonSafe(path.join(DSH_DIR, '.everything-oauth.json'));
-    const c = oc?.credentials?.['codex-oauth'] || oc?.credentials?.['openai-codex'];
+    const c = oc?.credentials?.['openai-codex'] || oc?.credentials?.['codex-oauth'];
     return c ? { type: 'oauth-codex', cred: c } : null;
   }
   if (p.oauth === 'anthropic') {
@@ -251,6 +253,13 @@ async function resolveProvider(body) {
     const dsh = loadDsh();
     provider = dsh.providers.find(p => p.id === body.providerId);
     if (!provider) throw fail(400, '未找到该 DSH provider，请检查是否已启用导入');
+    if (provider.oauth === 'codex' && dshOAuthRefreshEnabled) {
+      if (!sharedCodexResolver) {
+        const {createDshCodexResolver} = await import('./server/dsh-oauth.mjs');
+        sharedCodexResolver = createDshCodexResolver({dshDir:DSH_DIR,modulePath:process.env.TAROT_DSH_OAUTH_MODULE});
+      }
+      return {provider:validateProvider(provider),cred:await sharedCodexResolver()};
+    }
     cred = resolveCredential(body.providerId, dsh);
     if (!cred) throw fail(401, '无法解析该 provider 的凭据');
     cred = { ...cred, token: await getAccessToken(cred.type, cred.cred || cred) };
@@ -380,26 +389,47 @@ async function streamUpstream(res, provider, cred, body, signal) {
     await up.body?.cancel();
     throw fail(502, `AI 服务返回 HTTP ${up.status}，请检查所选模型、凭据与服务地址。`);
   }
-  if (!up.headers.get('content-type')?.includes('text/event-stream')) {
+  const contentType = up.headers.get('content-type')?.trim();
+  if (contentType && contentType.split(';')[0].trim().toLowerCase() !== 'text/event-stream') {
     await up.body?.cancel();
     throw fail(502, 'AI 服务未返回事件流');
   }
   const reader = up.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
+  // Some Codex responses omit Content-Type. Verify actual SSE framing and a
+  // recognized protocol event before accepting them; never forward raw bodies.
+  let verifiedStream = Boolean(contentType), probeBytes = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
+      if (!verifiedStream) {
+        probeBytes += value.byteLength;
+        if (probeBytes > 64 * 1024) throw fail(502, 'AI 服务未返回有效事件流');
+      }
       let boundary;
       while ((boundary = /\r?\n\r?\n/.exec(buf))) {
         const event = buf.slice(0, boundary.index);
         buf = buf.slice(boundary.index + boundary[0].length);
+        if (!verifiedStream && event.split(/\r?\n/).some(line => line && !/^(?:data:|event:|id:|retry:|:)/.test(line))) {
+          throw fail(502, 'AI 服务未返回有效事件流');
+        }
         const data = event.split(/\r?\n/).filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
         if (!data) continue;
-        if (data === '[DONE]') { sseSend(res, { t: 'done' }); return; }
+        if (data === '[DONE]') {
+          if (!verifiedStream) throw fail(502, 'AI 服务未返回有效事件流');
+          sseSend(res, { t: 'done' }); return;
+        }
         let j; try { j = JSON.parse(data); } catch { throw fail(502, 'AI 服务返回无效的事件数据'); }
+        if (!verifiedStream) {
+          const recognized = provider.kind === 'responses' ? typeof j?.type === 'string' && j.type.startsWith('response.')
+            : provider.kind === 'openai' ? Array.isArray(j?.choices)
+              : ['message_start', 'content_block_start', 'content_block_delta', 'message_delta', 'message_stop'].includes(j?.type);
+          if (!recognized) throw fail(502, 'AI 服务未返回有效事件流');
+          verifiedStream = true;
+        }
         if (j.type === 'error' || j.error || ['response.failed', 'response.incomplete'].includes(j.type)) throw fail(502, 'AI 服务返回错误或不完整响应，请重试。');
         const delta = j.choices?.[0]?.delta?.content
           ?? (j.type === 'response.output_text.delta' ? j.delta : undefined)
@@ -451,7 +481,10 @@ const server = http.createServer(async (req, res) => {
     let parsed, pathname;
     try { parsed = new URL(req.url, `http://${req.headers.host}`); pathname = decodeURIComponent(parsed.pathname); }
     catch { throw fail(400, '无效的 URL'); }
-    if (pathname === '/api/health' && req.method === 'GET') { json(res, 200, { ok: true }); return; }
+    if (pathname === '/api/health' && req.method === 'GET') {
+      res.setHeader('X-Tarot-Service', 'tarot-ritual');
+      json(res, 200, { ok: true }); return;
+    }
     if (pathname.startsWith('/api/')) {
       if (req.headers['x-tarot-request'] !== '1') throw fail(403, '缺少同源请求标记');
       if (pathname === '/api/dsh/import') {

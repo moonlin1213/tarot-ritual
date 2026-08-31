@@ -92,6 +92,9 @@ function selectedProvider() {
 async function refreshProviders(imported = null) {
   const dsh = imported || await loadDsh().catch(() => ({ found: false, enabled: false, providers: [] }));
   const banner = $('#dshBanner');
+  $('#dshConsentNote').textContent = dsh.oauthRefreshEnabled
+    ? '本机已启用 Codex 自动续期：由 DSH 共享凭据管理器在需要时更新登录凭据。密钥不返回页面；失效的授权仍需在 DSH 中重新登录。'
+    : '点击后授权本次服务只读导入本机 DSH 配置；页面不接收密钥，不改动 DSH 登录态。重启服务后可再次点击导入。';
   if (dsh.found && dsh.providers.length) {
     banner.classList.remove('hidden');
     const oauthN = dsh.providers.filter(p => p.oauth).length;

@@ -68,7 +68,9 @@ npm run start:dsh
 
 默认目录由操作系统的用户主目录决定：Windows 通常为 `%USERPROFILE%\.dsh`，macOS/Linux 为 `~/.dsh`。服务读取 `settings.yaml`、`.credentials.yaml`、`.everything-oauth.json`，不写回文件；只向浏览器返回服务与模型元数据，不返回 API Key、访问令牌或刷新令牌。
 
-OAuth 访问令牌过期时，在 DSH 中刷新或重新登录，再重试。此项目不自行刷新、不旋转刷新令牌、不创建 OAuth 登录。某些 OAuth 服务不开放模型列表，需要手动填写可用模型 ID。DSH 文件格式属于外部兼容接口，后续变更可能需要调整适配。
+默认只读模式下，OAuth 访问令牌过期时，在 DSH 中刷新或重新登录，再重试。项目不创建 OAuth 登录。某些 OAuth 服务不开放模型列表，需要手动填写可用模型 ID。DSH 文件格式属于外部兼容接口，后续变更可能需要调整适配。
+
+本机可额外显式设置 `TAROT_DSH_OAUTH_REFRESH=1`，并将 `TAROT_DSH_OAUTH_MODULE` 指向已安装的 `dsh-everything-oauth/lib/index.js` **绝对路径**，委托 DSH 已有的共享凭据管理器续期 Codex。该模式仅在请求 Codex 时按需刷新，并使用 DSH 的同一文件锁与原子写回；启动或导入本身不刷新。**开启后允许更新 DSH 登录凭据，不再是严格只读**；其他 Provider 不自动续期。组件缺失或授权失效时会提示，不清空凭据、不自动重试模型请求。导入令牌若与其他客户端共用，刷新可能影响另一端登录。设置界面会显示当前是否启用续期。
 
 如需更改端口或 DSH 目录：
 
