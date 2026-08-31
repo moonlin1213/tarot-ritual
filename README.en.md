@@ -147,7 +147,7 @@ test/               Isolated regression tests
 
 ## Artwork rights and local customization
 
-**The cat tarot artwork is not uploaded or distributed with this project because permission for public redistribution has not been obtained.** The open-source version retains its procedural particle artwork and works without any additional images. Free downloads on Pinterest or other platforms do not establish permission to reupload, bundle, or redistribute an entire deck. The code's ISC license does not cover those third-party images.
+**The tarot artwork used privately by the author cannot be open-sourced due to copyright restrictions and is therefore not uploaded or distributed with this project. Users who download the project for personal use can replace the artwork according to their preferences.** The open-source version retains its procedural particle artwork and works without any additional images. The code's ISC license does not cover third-party images added by users.
 
 After downloading the code, you can customize both card faces and backs locally with artwork you like and have permission to use. **The current public version has no one-click image upload or deck-switching interface: local rendering code must be modified. Simply placing images in a directory will not replace the artwork.** Development entry points:
 
