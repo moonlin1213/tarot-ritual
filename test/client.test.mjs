@@ -117,6 +117,9 @@ test('reading without an AI provider still opens the panel so the user can resta
   vm.runInContext(src + '\nS.spread={zh:"Fixture"}; selectedProvider=()=>null; toast=()=>{}; startReading();', context);
   assert.equal(nodes.get('#readingPanel')?.classList.contains('open'), true);
   assert.equal(nodes.get('#readingStream').classList.contains('streaming'), false);
+  assert.equal(nodes.get('#ritualHint').textContent, 'Fixture');
+  vm.runInContext('S.spread.zh="Another spread"; startReading();', context);
+  assert.equal(nodes.get('#ritualHint').textContent, 'Another spread');
 });
 
 test('photo flow disables reading when one physical card is assigned twice', async () => {
