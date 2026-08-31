@@ -290,7 +290,7 @@ export function createRitual(stage) {
   }
 
   // ---- 公开 API ----
-  function build(deck) {
+  function build(deck, { deterministic = false } = {}) {
     generation++;
     mode = 'idle';
     fanSink = 0;
@@ -298,7 +298,7 @@ export function createRitual(stage) {
     while (group.children.length) group.remove(group.children[0]);
     deck.forEach((card, i) => {
       const entry = newEntry(card, i);
-      entry.mesh.position.set((Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.2, -5 - i * 0.02);
+      entry.mesh.position.set(deterministic ? 0 : (Math.random() - 0.5) * 0.2, deterministic ? 0 : (Math.random() - 0.5) * 0.2, -5 - i * 0.02);
       entry.mesh.visible = false;
       group.add(entry.mesh);
       cards.push(entry);
@@ -348,6 +348,22 @@ export function createRitual(stage) {
     });
   }
   function endSelection() { mode = 'layout'; setHovered(null); retireFan(); }
+  function restoreLayout(placed) {
+    generation++;
+    mode = 'layout';
+    setHovered(null);
+    twain.items = [];
+    cards.forEach(entry => { entry.mesh.visible = false; });
+    for (const { entry, slotWorld: slot, reversed, revealed } of placed) {
+      if (!cards.includes(entry)) throw new Error('Restored card is not in this deck');
+      entry.state = 'drawn';
+      entry.mesh.visible = true;
+      entry.mesh.position.copy(slot.pos);
+      entry.mesh.rotation.set(0, revealed ? 0 : Math.PI, slot.rot + (revealed && reversed ? Math.PI : 0));
+      entry.mesh.scale.set(slot.scale, slot.scale, 1);
+      entry.pendingReveal = revealed ? null : { ...slot, reversed };
+    }
+  }
   function fanEntries() { return cards.filter(c => c.state === 'fan'); }
   function refan() { dealFan(fanEntries()); }
 
@@ -614,7 +630,7 @@ export function createRitual(stage) {
 
   return {
     build, intro, shuffle, beginSelection, endSelection,
-    flyToSlot, revealTogether, layoutSlots, fitCamera, resetCamera, refan,
+    flyToSlot, revealTogether, restoreLayout, layoutSlots, fitCamera, resetCamera, refan,
     set onSelect(cb) { onSelect = cb; },
     set onHover(cb) { onHover = cb; },
     set onEmptyClick(cb) { onEmptyClick = cb; },

@@ -11,6 +11,7 @@ import {
   buildReadingMessages, buildIdentifyMessages, mdToHtml,
 } from './core.js';
 import { renderCardFace } from './art/cardface.js';
+import { createCompanionAdapter } from './companion-adapter.js';
 
 const $ = s => document.querySelector(s);
 const CARD_W = 1.6, CARD_H = 2.8;
@@ -28,6 +29,10 @@ const S = {
   readingAbort: null,
   photoRows: [],       // { dataUrl, status, card, reversed }
   photoSpreadPicked: false,
+  companion: null,
+  companionLocked: false,
+  companionSession: null,
+  companionReadBusy: false,
 };
 
 // ---- 工具 -------------------------------------------------------------------
@@ -63,6 +68,20 @@ function mkBtn(label, cls, fn) {
 
 // ---- 启动 --------------------------------------------------------------------
 async function boot() {
+  let restored = null;
+  const configNode = $('#companion-config');
+  if (configNode) {
+    $('#beginBtn').disabled = true;
+    try {
+      S.companion = createCompanionAdapter(JSON.parse(configNode.textContent));
+      wireCompanion();
+      restored = await S.companion.restore();
+    } catch (error) {
+      $('#veil').classList.add('lifted');
+      toast('会话未能恢复，请刷新重试：' + error.message, true);
+      return;
+    }
+  }
   try { await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 3000))]); } catch { }
 
   initProviderState();
@@ -72,16 +91,149 @@ async function boot() {
   window.__ritual = ritual;
   ritual.onSelect = handleCardClick;
   ritual.onEmptyClick = () => closeCardDetail();
-  ritual.build(DECK);
+  ritual.build(DECK, { deterministic: Boolean(restored?.draws?.length) });
   setTimeout(() => $('#veil').classList.add('lifted'), 400);
-  setTimeout(() => ritual.intro(), 700);
+  if (!restored?.draws?.length) setTimeout(() => ritual.intro(), 700);
 
   wireQuestion();
   wireSpread();
   wireReading();
   wireSettings();
   wirePhoto();
+  if (restored) {
+    try { await restoreCompanionSession(restored); }
+    catch (error) { companionFailure(error); }
+  }
   refreshProviders();
+}
+
+// ---- Optional host-neutral managed session -----------------------------------
+function companionTerminal() {
+  return ['returned', 'stopped', 'deleted'].includes(S.companionSession?.phase);
+}
+function companionCannotReplace() {
+  return S.companion && (S.companionLocked || S.placed.length || companionTerminal());
+}
+function companionStatus(text) { $('#companionStatus').textContent = text; }
+function lockCompanionControls() {
+  const locked = Boolean(companionCannotReplace());
+  for (const id of ['beginBtn', 'newReadBtn', 'photoReadBtn', 'questionInput']) $('#' + id).disabled = locked;
+  $('#reReadBtn').disabled = companionTerminal() || S.companionReadBusy || (S.phase !== 'reading');
+}
+function companionFailure(error) {
+  S.companionLocked = true;
+  lockCompanionControls();
+  companionStatus('同步尚未确认；已保留本次记录，请刷新重试。' + error.message);
+}
+function wireCompanion() {
+  const box = document.createElement('div');
+  box.className = 'panel';
+  box.style.cssText = 'position:fixed;top:88px;left:16px;z-index:60;padding:12px;max-width:min(340px,calc(100vw - 32px))';
+  const status = document.createElement('p');
+  status.id = 'companionStatus'; status.setAttribute('role', 'status');
+  status.textContent = '正在恢复会话……';
+  const back = mkBtn('返回聊天', 'ghost small', async () => {
+    back.disabled = true;
+    try {
+      const receipt = await S.companion.returnToChat();
+      S.companionSession.phase = 'returned';
+      lockCompanionControls();
+      companionStatus(receipt.state === 'sent' ? '结果已送达聊天。' : '结果已交回，等待聊天端确认；可返回聊天查看。');
+    } catch (error) { companionStatus('暂未交回：' + error.message + '。解读进行中可等待或停止。'); }
+    finally { back.disabled = false; }
+  });
+  const stop = mkBtn('停止本次', 'ghost small', async () => {
+    stop.disabled = true;
+    try {
+      await S.companion.stop();
+      S.readingAbort?.abort(); clearTimeout(S.autoTimer);
+      S.companionSession = { ...S.companionSession, phase: 'stopped' };
+      S.companionLocked = true;
+      setPhase(S.placed.length ? 'reading' : 'question');
+      actions(); lockCompanionControls();
+      companionStatus('本次已停止。已有记录保留；不会自动重试解读。');
+    } catch (error) { companionStatus('停止尚未确认：' + error.message); }
+    finally { stop.disabled = false; }
+  });
+  box.append(status, back, stop); $('#ui').appendChild(box);
+}
+function renderCompanionReading(session) {
+  hint(S.spread.zh);
+  $('#readingTitle').textContent = S.spread.zh;
+  $('#readingQuestion').textContent = S.question;
+  chipsHtml();
+  S.readingRaw = session.reading?.text || '';
+  const stream = $('#readingStream');
+  stream.classList.remove('streaming');
+  stream.innerHTML = S.readingRaw ? mdToHtml(S.readingRaw) : '';
+  if (!S.readingRaw) stream.textContent = '尚无完整原解读。可查看牌义，或配置服务后主动请求解读。';
+  $('#readingPanel').classList.add('open');
+  const state = session.reading?.state;
+  const labels = { running: '原解读仍在进行；查看已有解读不会发起新请求。', unknown: '原解读状态未知，可能已产生费用。未自动重试。', failed: '原解读失败，未自动重试。', cancelled: '原解读已取消。', succeeded: '已恢复原解读。' };
+  companionStatus(companionTerminal() ? '本次会话已结束，已有结果仅供查看。' : labels[state] || '牌面已保存；尚无完整原解读。');
+  $('#reReadBtn').textContent = state === 'running' ? '查看已有解读' : '再 问 一 次';
+  S.companionReadBusy = false;
+  lockCompanionControls();
+}
+async function restoreCompanionSession(session) {
+  S.companionSession = session;
+  S.question = session.question || '';
+  $('#questionInput').value = S.question;
+  S.companionLocked = Boolean(session.draws.length) || companionTerminal();
+  if (!session.draws.length) {
+    lockCompanionControls();
+    companionStatus(companionTerminal() ? '本次会话已结束。' : '会话已就绪；抽牌将保存到本次记录。');
+    return;
+  }
+  const spread = SPREADS.find(sp => sp.id === session.spread_id);
+  const draws = [...session.draws].sort((a, b) => a.position - b.position);
+  if (!spread || draws.length !== spread.count || new Set(draws.map(d => d.card_id)).size !== draws.length
+    || draws.some((d, i) => d.position !== i || !byId[d.card_id] || typeof d.reversed !== 'boolean' || typeof d.revealed !== 'boolean')) {
+    throw new Error('保存的牌阵不符合牌库，已停止恢复。');
+  }
+  S.spread = spread; computeScale();
+  const ritual = window.__ritual, slots = ritual.layoutSlots(spread, S.scale);
+  S.placed = draws.map(d => ({ entry: ritual.cards.find(e => e.card.id === d.card_id), card: byId[d.card_id], reversed: d.reversed, revealed: d.revealed, slot: spread.slots[d.position], slotWorld: slots[d.position] }));
+  ritual.restoreLayout(S.placed); ritual.fitCamera(spread, S.scale);
+  const pending = S.placed.filter(p => !p.revealed);
+  setPhase('reading');
+  renderCompanionReading(session);
+  if (pending.length && !companionTerminal()) {
+    setPhase('reveal'); lockCompanionControls();
+    ritual.revealTogether(pending.map(p => p.entry), async () => {
+      if (companionTerminal()) return;
+      try {
+        await S.companion.reveal({ positions: draws.filter(d => !d.revealed).map(d => d.position) });
+        setPhase('reading'); renderCompanionReading(session);
+      } catch (error) { companionFailure(error); }
+    });
+  }
+}
+async function finishManagedDraw(batch) {
+  S.companionLocked = true;
+  setPhase('reveal'); actions(); lockCompanionControls();
+  hint('牌已齐备，正在保存本次抽牌……');
+  try {
+    await S.companion.commitDraw({ question: S.question, spread_id: S.spread.id,
+      draws: batch.map((p, position) => ({ position, card_id: p.card.id, reversed: p.reversed })) });
+    if (companionTerminal() || S.placed !== batch) return;
+    window.__ritual.revealTogether(batch.map(p => p.entry), async () => {
+      if (S.phase !== 'reveal' || S.placed !== batch || companionTerminal()) return;
+      setPhase('sync');
+      try {
+        await S.companion.reveal({ positions: batch.map((_, i) => i) });
+        if (companionTerminal()) return;
+        setPhase('reading'); lockCompanionControls(); startReading();
+      } catch (error) { companionFailure(error); }
+    });
+  } catch (error) { companionFailure(error); }
+}
+
+async function refreshCompanionReading() {
+  try {
+    S.companionSession = await S.companion.restore();
+    renderCompanionReading(S.companionSession);
+  } catch (error) { companionFailure(error); }
 }
 
 // ---- Provider ----------------------------------------------------------------
@@ -265,6 +417,7 @@ function wireSettings() {
 // ---- 一 · 问询 -----------------------------------------------------------------
 function wireQuestion() {
   $('#beginBtn').addEventListener('click', () => {
+    if (companionCannotReplace()) return;
     S.question = $('#questionInput').value.trim();
     S.autoMode = document.querySelector('input[name="spreadMode"]:checked').value === 'auto';
     if ($('#photoMode').checked) {
@@ -276,6 +429,7 @@ function wireQuestion() {
 }
 
 function openSpreadPhase() {
+  if (companionCannotReplace()) return;
   const list = $('#spreadList');
   list.innerHTML = '';
   $('#autoReason').classList.add('hidden');
@@ -307,6 +461,7 @@ function openSpreadPhase() {
         <span class="spread-desc">${sp.desc}</span>
       </span>`;
     item.addEventListener('click', () => {
+      if (companionCannotReplace()) return;
       S.spread = sp;
       item.parentElement.querySelectorAll('.spread-item').forEach(x => x.classList.remove('chosen'));
       item.classList.add('chosen');
@@ -340,6 +495,7 @@ function computeScale() {
 }
 
 function startRitual() {
+  if (companionCannotReplace()) return;
   clearTimeout(S.autoTimer);
   computeScale();
   setPhase('shuffle');
@@ -348,7 +504,9 @@ function startRitual() {
   S.placed = [];
   hint(`静心。命运正在洗牌……`);
   actions();
+  const companion = S.companion, batch = S.placed;
   window.__ritual.shuffle(() => {
+    if (companion && (S.companion !== companion || companionTerminal() || S.phase !== 'shuffle' || S.placed !== batch)) return;
     setPhase('select');
     window.__ritual.beginSelection();
     if (S.photoFlow) {
@@ -379,6 +537,7 @@ function closeCardDetail() {
 }
 
 function drawCard(entry) {
+  if (S.companion && (S.companionLocked || companionTerminal() || S.phase !== 'select')) return;
   const idx = S.placed.length;
   if (idx >= S.spread.count) return;
   const slotWorld = window.__ritual.layoutSlots(S.spread, S.scale)[idx];
@@ -392,6 +551,7 @@ function drawCard(entry) {
       const batch = S.placed;
       clearTimeout(S.autoTimer);
       window.__ritual.endSelection();
+      if (S.companion) { finishManagedDraw(batch); return; }
       setPhase('reveal');
       hint('牌已齐备。屏息，共同揭晓……');
       actions();
@@ -434,7 +594,8 @@ function chipsHtml() {
   });
 }
 
-function startReading() {
+function startReading({ attempt_id } = {}) {
+  if (S.companion && (companionTerminal() || S.companionReadBusy || S.phase !== 'reading')) return;
   hint(S.spread.zh);
   $('#readingTitle').textContent = S.spread.zh;
   $('#readingQuestion').textContent = S.question ? `「${S.question}」` : '「愿牌语直指当下最需要看见之事」';
@@ -447,14 +608,14 @@ function startReading() {
   if (S.readingAbort) S.readingAbort.abort();
 
   const p = selectedProvider();
-  if (!p) {
+  if (!p && !attempt_id) {
     stream.classList.remove('streaming');
     stream.textContent = '尚未连接 AI。可点击牌面查看内置牌义，或在右上角配置服务后点击「再问一次」。';
     return;
   }
-  const model = currentModel(p.id);
-  if (!model) { stream.classList.remove('streaming'); stream.textContent = '请先在右上角选定模型，再点击「再问一次」。'; return; }
-  const providerArg = p.id.startsWith('custom:')
+  const model = p && currentModel(p.id);
+  if (!model && !attempt_id) { stream.classList.remove('streaming'); stream.textContent = '请先在右上角选定模型，再点击「再问一次」。'; return; }
+  const providerArg = p?.id.startsWith('custom:')
     ? { kind: p.kind, baseURL: p.baseURL, apiKey: p.apiKey, label: p.label }
     : undefined;
 
@@ -463,17 +624,32 @@ function startReading() {
   });
   if (S.readingAbort) S.readingAbort.abort();
   S.readingAbort = new AbortController();
+  let transport;
+  if (S.companion) {
+    const action_id = attempt_id ? null : crypto.randomUUID();
+    if (action_id) {
+      try {
+        localStorage.setItem(`cove-tarot-companion-v1.reading.${S.companionSession.id}`, action_id);
+      } catch (error) { stream.classList.remove('streaming'); companionFailure(error); return; }
+    }
+    S.companionReadBusy = true; lockCompanionControls();
+    transport = (body, options) => S.companion.read(attempt_id ? { attempt_id } : { ...body, action_id }, options);
+  }
   chat({
-    providerId: p.id.startsWith('custom:') ? null : p.id,
+    providerId: !p || p.id.startsWith('custom:') ? null : p.id,
     provider: providerArg,
     model, messages, temperature: 0.8, maxTokens: 4096,
     signal: S.readingAbort.signal,
+    transport,
     onDelta(v) {
       S.readingRaw += v;
       stream.innerHTML = mdToHtml(S.readingRaw);
       stream.scrollTop = stream.scrollHeight;
     },
-    onDone() { stream.classList.remove('streaming'); },
+    onDone() {
+      stream.classList.remove('streaming');
+      if (S.companion) refreshCompanionReading();
+    },
     onError(msg) {
       stream.classList.remove('streaming');
       const err = document.createElement('p');
@@ -487,7 +663,16 @@ function startReading() {
 }
 
 function wireReading() {
-  $('#reReadBtn').addEventListener('click', () => { if (S.placed.length) startReading(); });
+  $('#reReadBtn').addEventListener('click', () => {
+    if (!S.placed.length) return;
+    if (S.companion) {
+      if (companionTerminal() || S.companionReadBusy) return;
+      const reading = S.companionSession?.reading;
+      if (reading?.state === 'running') { startReading({ attempt_id: reading.id }); return; }
+      if (reading?.state === 'unknown' && !window.confirm('先前解读状态未知，可能已经计费。确定发起一次新的解读吗？')) return;
+    }
+    startReading();
+  });
   $('#newReadBtn').addEventListener('click', () => softReset());
   $('#copyReadBtn').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(S.readingRaw); toast('解读已誊抄至剪贴板'); }
@@ -520,6 +705,7 @@ function showCardDetail(entry) {
 }
 
 function softReset() {
+  if (companionCannotReplace()) { toast('本次记录已锁定；请返回聊天开始新的占问。'); return; }
   if (S.readingAbort) S.readingAbort.abort();
   clearTimeout(S.autoTimer);
   $('#readingPanel').classList.remove('open');
@@ -707,6 +893,7 @@ function refreshPhotoRead() {
 }
 
 function beginPhotoReading() {
+  if (companionCannotReplace()) return;
   if (S.photoRows.some(r => !r.card) || new Set(S.photoRows.map(r => r.card.id)).size !== S.photoRows.length) {
     toast('请为每个牌位选择不同且已确认的牌', true); return;
   }
@@ -726,6 +913,21 @@ function dealPhotoCards() {
   ritual.endSelection();
   const slots = ritual.layoutSlots(S.spread, S.scale);
   S.placed = [];
+  if (S.companion) {
+    const batch = S.photoPending.map((p, i) => ({ entry: ritual.cards.find(e => e.card.id === p.card.id), card: p.card,
+      reversed: p.reversed, slot: S.spread.slots[i], slotWorld: slots[i] }));
+    if (batch.some(p => !p.entry)) { companionFailure(new Error('牌库中缺少已确认的牌')); return; }
+    S.placed = batch;
+    ritual.fitCamera(S.spread, S.scale);
+    batch.forEach((p, i) => setTimeout(() => {
+      if (S.placed !== batch || companionTerminal()) return;
+      ritual.flyToSlot(p.entry, { ...p.slotWorld, reversed: p.reversed, deferReveal: true }, () => {
+        p.arrived = true;
+        if (S.phase === 'select' && S.placed === batch && batch.every(p => p.arrived)) finishManagedDraw(batch);
+      });
+    }, i * 620));
+    return;
+  }
   hint('实拍之牌，各归其位……');
   ritual.fitCamera(S.spread, S.scale);
   S.photoPending.forEach((p, i) => {

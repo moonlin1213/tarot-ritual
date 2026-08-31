@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import url from 'node:url';
+import { timingSafeEqual } from 'node:crypto';
 import { load as loadYaml } from 'js-yaml';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -19,6 +20,7 @@ const DSH_DIR = process.env.TAROT_DSH_DIR || path.join(os.homedir(), '.dsh');
 const PORT = Number(process.env.PORT ?? 8642);
 const HOST = '127.0.0.1';
 const MAX_BODY = 4 * 1024 * 1024;
+const COMPANION_TOKEN = process.env.COVE_TAROT_COMPANION_TOKEN || '';
 if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) throw new Error('PORT must be an integer from 0 to 65535');
 
 function fail(status, message) { return Object.assign(new Error(message), { status, publicMessage: message }); }
@@ -484,6 +486,14 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/health' && req.method === 'GET') {
       res.setHeader('X-Tarot-Service', 'tarot-ritual');
       json(res, 200, { ok: true }); return;
+    }
+    if (pathname === '/api/companion-health') {
+      if (!COMPANION_TOKEN) throw fail(404, 'Not Found');
+      if (req.method !== 'GET') throw fail(405, 'Method Not Allowed');
+      const expected = Buffer.from('Bearer ' + COMPANION_TOKEN);
+      const supplied = Buffer.from(req.headers.authorization || '');
+      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw fail(403, 'Forbidden');
+      json(res, 200, { protocol: 'cove-tarot-engine-v1', engine: 'tarot', version: 1 }); return;
     }
     if (pathname.startsWith('/api/')) {
       if (req.headers['x-tarot-request'] !== '1') throw fail(403, '缺少同源请求标记');

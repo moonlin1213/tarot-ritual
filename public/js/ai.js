@@ -104,15 +104,15 @@ export async function fetchModels(pid) {
 }
 
 // ---- 流式对话 ------------------------------------------------------------------
-export async function chat({ providerId, provider, model, messages, temperature, maxTokens, onDelta, onDone, onError, signal }) {
+export async function chat({ providerId, provider, model, messages, temperature, maxTokens, onDelta, onDone, onError, signal, transport }) {
   const body = { providerId, provider, model, messages, temperature, maxTokens };
   let reader;
   let errored = false;
   try {
-    const res = await fetch('/api/chat', {
+    const res = await (transport ? transport(body, { signal }) : fetch('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Tarot-Request': '1' },
       body: JSON.stringify(body), signal,
-    });
+    }));
     if (!res.ok || !res.body) {
       const error = await res.json().catch(() => null);
       throw new Error(error?.error || `服务返回 ${res.status}`);
